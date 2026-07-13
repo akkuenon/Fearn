@@ -1,0 +1,32 @@
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+build/
+DerivedData/
+
+# Build artifacts
+*.ipa
+*.app
+*.dSYM
+*.o
+
+# Certificates and provisioning
+*.mobileprovision
+*.cer
+*.p8
+*.key
+*.p12
+
+# IDE
+.DS_Store
+.vscode/
+*.swp
+*.swo
+
+# Dependencies
+Pods/
+Carthage/
+
+# Misc
+*.log
+.env

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>AppIDName</key>
+	<string>Fearn App</string>
+	<key>AppIdentifierPrefix</key>
+	<array>
+		<string>XXXXXXXXXX</string>
+	</array>
+	<key>Entitlements</key>
+	<dict>
+		<key>application-identifier</key>
+		<string>XXXXXXXXXX.com.krnlthemodder.fearn</string>
+		<key>keychain-access-groups</key>
+		<array>
+			<string>XXXXXXXXXX.*</string>
+		</array>
+	</dict>
+	<key>Version</key>
+	<integer>1</integer>
+</dict>
+</plist>
