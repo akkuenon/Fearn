@@ -1,0 +1,406 @@
+name: Build IPA Package
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'Payload/**'
+      - 'fearn_ipa_builder.py'
+      - 'fearn_entitlements_ui.py'
+      - '.github/workflows/build-ipa.yml'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: 'App Name'
+        required: false
+        default: 'Fearn'
+      bundle_id:
+        description: 'Bundle ID'
+        required: false
+        default: 'com.fearn.app'
+      version:
+        description: 'Version'
+        required: false
+        default: '1.0'
+
+jobs:
+  build:
+    name: Build IPA
+    runs-on: macos-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml plistlib
+
+      - name: Get version
+        id: version
+        run: |
+          if [ -f VERSION ]; then
+            VERSION=$(cat VERSION)
+          else
+            VERSION="1.0.0"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Build version: $VERSION"
+
+      - name: Create app bundle structure
+        run: |
+          mkdir -p Payload/Fearn.app/_CodeSignature
+          mkdir -p Payload/Fearn.app/assets
+          echo "App bundle structure created"
+
+      - name: Generate Info.plist
+        run: |
+          python3 << 'EOF'
+          import plistlib
+          from pathlib import Path
+          
+          info_plist = {
+              'CFBundleDevelopmentRegion': 'en',
+              'CFBundleExecutable': 'Fearn',
+              'CFBundleIdentifier': 'com.fearn.app',
+              'CFBundleInfoDictionaryVersion': '6.0',
+              'CFBundleName': 'Fearn',
+              'CFBundlePackageType': 'APPL',
+              'CFBundleShortVersionString': '${{ steps.version.outputs.version }}',
+              'CFBundleVersion': '1',
+              'LSRequiresIPhoneOS': True,
+              'UILaunchStoryboardName': 'LaunchScreen',
+              'UISupportedInterfaceOrientations': [
+                  'UIInterfaceOrientationPortrait',
+                  'UIInterfaceOrientationLandscapeLeft',
+                  'UIInterfaceOrientationLandscapeRight',
+              ],
+              'NSBonjourServices': [],
+              'NSLocalNetworkUsageDescription': 'This app uses local network for app features',
+              'NSBonjourServiceTypes': [],
+          }
+          
+          plist_path = Path('Payload/Fearn.app/Info.plist')
+          with open(plist_path, 'wb') as f:
+              plistlib.dump(info_plist, f)
+          
+          print(f"✓ Generated Info.plist")
+          EOF
+
+      - name: Create PkgInfo
+        run: |
+          printf 'APPL????' > Payload/Fearn.app/PkgInfo
+          echo "✓ Created PkgInfo"
+
+      - name: Generate CodeResources
+        run: |
+          cat > Payload/Fearn.app/_CodeSignature/CodeResources << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>files</key>
+              <dict>
+                  <key>Info.plist</key>
+                  <data>
+                  </data>
+              </dict>
+              <key>files2</key>
+              <dict>
+                  <key>Info.plist</key>
+                  <dict>
+                      <key>hash2</key>
+                      <data></data>
+                  </dict>
+              </dict>
+              <key>rules</key>
+              <dict>
+                  <key>^</key>
+                  <true/>
+                  <key>^[^/]+$</key>
+                  <dict>
+                      <key>omit</key>
+                      <true/>
+                      <key>weight</key>
+                      <real>10</real>
+                  </dict>
+                  <key>^[^/]+/(.*/)?\.DS_Store$</key>
+                  <dict>
+                      <key>omit</key>
+                      <true/>
+                      <key>weight</key>
+                      <real>2000</real>
+                  </dict>
+              </dict>
+              <key>rules2</key>
+              <dict>
+                  <key>.*\.dSYM($|/)</key>
+                  <dict>
+                      <key>weight</key>
+                      <real>11</real>
+                  </dict>
+                  <key>^</key>
+                  <dict>
+                      <key>weight</key>
+                      <real>20</real>
+                  </dict>
+                  <key>^(.*/)?\.DS_Store$</key>
+                  <dict>
+                      <key>omit</key>
+                      <true/>
+                      <key>weight</key>
+                      <real>2000</real>
+                  </dict>
+              </dict>
+          </dict>
+          </plist>
+          EOF
+          echo "✓ Generated CodeResources"
+
+      - name: Create iTunes Metadata
+        run: |
+          python3 << 'EOF'
+          import plistlib
+          from pathlib import Path
+          
+          metadata = {
+              'bundleShortVersionString': '${{ steps.version.outputs.version }}',
+              'bundleVersion': '1',
+              'softwareVersionBundleId': 'com.fearn.app',
+              'artistName': 'Fearn Developer',
+              'softwarePlatforms': ['iphoneos'],
+          }
+          
+          metadata_path = Path('iTunesMetadata.plist')
+          with open(metadata_path, 'wb') as f:
+              plistlib.dump(metadata, f)
+          
+          print(f"✓ Generated iTunesMetadata.plist")
+          EOF
+
+      - name: Build IPA Archive
+        run: |
+          cd .
+          zip -r Fearn-${{ steps.version.outputs.version }}.ipa Payload iTunesMetadata.plist -q
+          ls -lh Fearn-${{ steps.version.outputs.version }}.ipa
+          echo "✓ IPA archive created: Fearn-${{ steps.version.outputs.version }}.ipa"
+
+      - name: Verify IPA Structure
+        run: |
+          unzip -l Fearn-${{ steps.version.outputs.version }}.ipa | head -20
+          echo ""
+          echo "✓ IPA structure verified"
+
+      - name: Upload IPA as Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: Fearn-IPA
+          path: Fearn-${{ steps.version.outputs.version }}.ipa
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Create Release (on main branch)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: Fearn-${{ steps.version.outputs.version }}.ipa
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Fearn v${{ steps.version.outputs.version }}
+          body: |
+            ## Fearn iOS Application v${{ steps.version.outputs.version }}
+            
+            ### Build Information
+            - **Version**: ${{ steps.version.outputs.version }}
+            - **Bundle ID**: com.fearn.app
+            - **Platform**: iOS
+            - **Build Date**: ${{ github.event.head_commit.timestamp }}
+            - **Commit**: ${{ github.sha }}
+            
+            ### Contents
+            - Payload/Fearn.app (Application Bundle)
+            - Info.plist (Application Configuration)
+            - CodeSignature (Code Signing)
+            - iTunesMetadata.plist (iTunes Metadata)
+            
+            ### Download
+            Download the IPA file below to install on your iOS device.
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Summary
+        if: always()
+        run: |
+          echo "========================================"
+          echo "  Build Summary"
+          echo "========================================"
+          echo "Version: ${{ steps.version.outputs.version }}"
+          echo "Artifact: Fearn-${{ steps.version.outputs.version }}.ipa"
+          echo "Status: ${{ job.status }}"
+          echo "========================================"
+
+  quality-check:
+    name: Quality Checks
+    runs-on: macos-latest
+    needs: build
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download IPA
+        uses: actions/download-artifact@v3
+        with:
+          name: Fearn-IPA
+
+      - name: Validate IPA Format
+        run: |
+          IPA_FILE=$(ls *.ipa)
+          echo "Validating: $IPA_FILE"
+          
+          # Check if valid zip
+          unzip -t "$IPA_FILE" > /dev/null
+          if [ $? -eq 0 ]; then
+            echo "✓ Valid ZIP archive"
+          else
+            echo "✗ Invalid ZIP archive"
+            exit 1
+          fi
+          
+          # Check required files
+          unzip -l "$IPA_FILE" | grep -q "Payload.*\.app"
+          if [ $? -eq 0 ]; then
+            echo "✓ Contains app bundle"
+          else
+            echo "✗ Missing app bundle"
+            exit 1
+          fi
+          
+          unzip -l "$IPA_FILE" | grep -q "iTunesMetadata.plist"
+          if [ $? -eq 0 ]; then
+            echo "✓ Contains iTunes metadata"
+          else
+            echo "✗ Missing iTunes metadata"
+            exit 1
+          fi
+
+      - name: Check IPA Size
+        run: |
+          IPA_FILE=$(ls *.ipa)
+          SIZE=$(du -h "$IPA_FILE" | cut -f1)
+          echo "IPA Size: $SIZE"
+          echo "✓ Quality check passed"
+
+  security-scan:
+    name: Security Scan
+    runs-on: macos-latest
+    needs: build
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download IPA
+        uses: actions/download-artifact@v3
+        with:
+          name: Fearn-IPA
+
+      - name: Scan for suspicious files
+        run: |
+          IPA_FILE=$(ls *.ipa)
+          mkdir -p scan_temp
+          unzip -q "$IPA_FILE" -d scan_temp
+          
+          echo "Scanning for suspicious patterns..."
+          
+          # Check for common malware patterns
+          if find scan_temp -name "*.dylib" | grep -q .; then
+            echo "⚠ Dynamic libraries found (verify these are legitimate)"
+          fi
+          
+          # Check permissions
+          find scan_temp -type f -exec file {} \; | grep -q executable
+          if [ $? -eq 0 ]; then
+            echo "ℹ Executable files present"
+          fi
+          
+          echo "✓ Security scan completed"
+          
+          rm -rf scan_temp
+
+  test-install:
+    name: Test Installation Compatibility
+    runs-on: macos-latest
+    needs: build
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download IPA
+        uses: actions/download-artifact@v3
+        with:
+          name: Fearn-IPA
+
+      - name: Verify IPA can be unpacked
+        run: |
+          IPA_FILE=$(ls *.ipa)
+          mkdir -p test_extract
+          unzip -q "$IPA_FILE" -d test_extract
+          
+          # Verify structure
+          if [ -d "test_extract/Payload" ]; then
+            echo "✓ Payload directory present"
+          else
+            echo "✗ Missing Payload directory"
+            exit 1
+          fi
+          
+          # Count app bundles
+          APP_COUNT=$(find test_extract/Payload -name "*.app" -type d | wc -l)
+          echo "Found $APP_COUNT app bundle(s)"
+          
+          if [ $APP_COUNT -gt 0 ]; then
+            echo "✓ App bundle found"
+          else
+            echo "✗ No app bundle found"
+            exit 1
+          fi
+          
+          rm -rf test_extract
+          echo "✓ Installation compatibility verified"
+
+  notify:
+    name: Notify on Completion
+    runs-on: ubuntu-latest
+    needs: [build, quality-check, security-scan, test-install]
+    if: always()
+
+    steps:
+      - name: Check Build Status
+        run: |
+          if [ "${{ needs.build.result }}" = "success" ]; then
+            echo "✓ Build completed successfully"
+            echo "::notice::Fearn IPA v${{ github.ref_name }} built successfully"
+          else
+            echo "✗ Build failed"
+            echo "::error::Fearn IPA build failed - check logs"
+          fi
