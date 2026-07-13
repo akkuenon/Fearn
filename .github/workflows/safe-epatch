@@ -1,0 +1,57 @@
+patch-entitlements:
+  name: Patch Entitlements
+  runs-on: macos-latest
+  needs: build
+
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download IPA
+      uses: actions/download-artifact@v4
+      with:
+        name: Fearn-IPA
+
+    - name: Extract IPA
+      run: |
+        IPA=$(ls *.ipa)
+        mkdir ipa_extract
+        unzip -q "$IPA" -d ipa_extract
+        echo "Extracted $IPA"
+
+    - name: Inject Entitlements
+      run: |
+        ENT="ipa_extract/Payload/Fearn.app/Entitlements.plist"
+
+        cat > "$ENT" << 'EOF'
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>get-task-allow</key><true/>
+            <key>com.apple.security.cs.allow-jit</key><true/>
+            <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+            <key>com.apple.security.cs.disable-library-validation</key><true/>
+            <key>com.apple.security.cs.allow-dyld-environment-variables</key><true/>
+            <key>com.apple.developer.networking.multicast</key><true/>
+            <key>com.apple.developer.networking.wifi-info</key><true/>
+        </dict>
+        </plist>
+        EOF
+
+        echo "✓ Entitlements injected into $ENT"
+
+    - name: Repack Patched IPA
+      run: |
+        IPA=$(ls *.ipa)
+        NEW_IPA="patched-$IPA"
+        cd ipa_extract
+        zip -qr "../$NEW_IPA" Payload iTunesMetadata.plist
+        cd ..
+        echo "✓ Repacked patched IPA: $NEW_IPA"
+
+    - name: Upload Patched IPA
+      uses: actions/upload-artifact@v4
+      with:
+        name: Patched-IPA
+        path: patched-*.ipa
