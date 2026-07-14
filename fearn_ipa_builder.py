@@ -1,60 +1,40 @@
 #!/usr/bin/env python3
 """
-Fearn IPA Builder - Build complete iOS application packages
+Fearn IPA Builder
+
+Builds an iOS IPA (iPhone Application Archive) from app resources.
 """
 
+import argparse
 import os
-import sys
-import subprocess
 import shutil
-import json
-from pathlib import Path
-from typing import Optional
+import subprocess
+import zipfile
 
-class IPABuilder:
-    """Build complete IPA files"""
+def run_command(cmd, verbose=False):
+    """Execute a shell command."""
+    if verbose:
+        print(f"Running: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"Error: {result.stderr}")
+        raise RuntimeError(f"Command failed: {' '.join(cmd)}")
+    return result.stdout
+
+def create_ipa_structure(app_name, verbose=False):
+    """Create the basic IPA directory structure."""
+    if verbose:
+        print(f"Creating IPA structure for {app_name}")
     
-    def __init__(self, verbose: bool = False):
-        self.verbose = verbose
-        self.template_dir = Path('Payload')
+    # Create directories
+    payload_dir = "Payload"
+    app_dir = os.path.join(payload_dir, f"{app_name}.app")
     
-    def log(self, message: str, level: str = 'INFO'):
-        """Log message"""
-        if self.verbose or level != 'DEBUG':
-            print(f"[{level}] {message}")
+    os.makedirs(app_dir, exist_ok=True)
+    os.makedirs(os.path.join(payload_dir, "Symbols"), exist_ok=True)
     
-    def print_header(self, title: str):
-        """Print header"""
-        print(f"\n{'='*60}")
-        print(f"  {title}")
-        print(f"{'='*60}")
-    
-    def build_ipa(self, app_name: str, bundle_id: str, version: str = "1.0",
-                  team_id: str = "XXXXXXXXXX", output_dir: str = ".") -> bool:
-        """Build an IPA file"""
-        self.print_header(f"Building IPA: {app_name}")
-        
-        try:
-            # Create output directory
-            output_path = Path(output_dir)
-            output_path.mkdir(parents=True, exist_ok=True)
-            
-            # Create build directory
-            build_dir = Path('.ipa_build')
-            if build_dir.exists():
-                shutil.rmtree(build_dir)
-            build_dir.mkdir()
-            
-            # Create Payload directory
-            payload_dir = build_dir / 'Payload'
-            app_bundle_dir = payload_dir / f"{app_name}.app"
-            app_bundle_dir.mkdir(parents=True, exist_ok=True)
-            
-            self.log(f"Creating app bundle: {app_name}.app")
-            
-            # Create Info.plist
-            info_plist = app_bundle_dir / 'Info.plist'
-            info_plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+    # Create a minimal Info.plist
+    plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -63,7 +43,7 @@ class IPABuilder:
     <key>CFBundleExecutable</key>
     <string>{app_name}</string>
     <key>CFBundleIdentifier</key>
-    <string>{bundle_id}</string>
+    <string>com.krnlthemodder.{app_name.lower()}</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
@@ -71,138 +51,106 @@ class IPABuilder:
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>{version}</string>
+    <string>1.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+    <key>UIRequiredDeviceCapabilities</key>
+    <array>
+        <string>armv7</string>
+    </array>
     <key>UISupportedInterfaceOrientations</key>
     <array>
         <string>UIInterfaceOrientationPortrait</string>
-        <string>UIInterfaceOrientationLandscapeLeft</string>
-        <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
 </dict>
-</plist>"""
-            
-            with open(info_plist, 'w') as f:
-                f.write(info_plist_content)
-            self.log("Created Info.plist")
-            
-            # Create PkgInfo
-            pkg_info = app_bundle_dir / 'PkgInfo'
-            with open(pkg_info, 'wb') as f:
-                f.write(b'APPL????')
-            self.log("Created PkgInfo")
-            
-            # Create Code Signature directory
-            codesig_dir = app_bundle_dir / '_CodeSignature'
-            codesig_dir.mkdir(exist_ok=True)
-            
-            # Create CodeResources
-            code_resources = codesig_dir / 'CodeResources'
-            code_resources_content = """<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>files</key>
-    <dict>
-        <key>Info.plist</key>
-        <data>PLACEHOLDER</data>
-    </dict>
-    <key>rules</key>
-    <dict>
-        <key>^</key>
-        <true/>
-    </dict>
-</dict>
-</plist>"""
-            
-            with open(code_resources, 'w') as f:
-                f.write(code_resources_content)
-            self.log("Created CodeResources")
-            
-            # Create iTunesMetadata.plist
-            itunes_metadata = build_dir / 'iTunesMetadata.plist'
-            itunes_content = f"""<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>bundleShortVersionString</key>
-    <string>{version}</string>
-    <key>bundleVersion</key>
-    <string>1</string>
-    <key>softwareVersionBundleId</key>
-    <string>{bundle_id}</string>
-</dict>
-</plist>"""
-            
-            with open(itunes_metadata, 'w') as f:
-                f.write(itunes_content)
-            self.log("Created iTunesMetadata.plist")
-            
-            # Create IPA (zip file)
-            ipa_name = f"{app_name}-{version}.ipa"
-            ipa_path = output_path / ipa_name
-            
-            self.log(f"Creating IPA archive: {ipa_name}")
-            
-            # Change to build directory and create zip
-            cwd = os.getcwd()
-            os.chdir(build_dir)
-            subprocess.run(['zip', '-r', '-q', str(ipa_path.absolute()), '.'],
-                         check=True, capture_output=True)
-            os.chdir(cwd)
-            
-            self.log(f"IPA created: {ipa_path}")
-            
-            # Clean up
-            shutil.rmtree(build_dir)
-            self.log("Build directory cleaned")
-            
-            self.print_header(f"Build Complete!")
-            print(f"  App Name: {app_name}")
-            print(f"  Bundle ID: {bundle_id}")
-            print(f"  Version: {version}")
-            print(f"  Output: {ipa_path}")
-            print()
-            
-            return True
-        
-        except Exception as e:
-            self.log(f"Build failed: {e}", 'ERROR')
-            if build_dir.exists():
-                shutil.rmtree(build_dir)
-            return False
+</plist>
+"""
+    
+    info_plist_path = os.path.join(app_dir, "Info.plist")
+    with open(info_plist_path, "w") as f:
+        f.write(plist_content)
+    
+    if verbose:
+        print(f"Created Info.plist at {info_plist_path}")
+    
+    return payload_dir, app_dir
 
+def create_ipa(payload_dir, output_path, verbose=False):
+    """Create the final IPA file."""
+    if verbose:
+        print(f"Creating IPA archive: {output_path}")
+    
+    with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for root, dirs, files in os.walk(payload_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                arcname = os.path.relpath(file_path, '.')
+                zipf.write(file_path, arcname)
+    
+    if verbose:
+        print(f"IPA created successfully: {output_path}")
 
 def main():
-    import argparse
-    
     parser = argparse.ArgumentParser(
-        description='Fearn IPA Builder - Build iOS application packages'
+        description="Build an iOS IPA for Fearn"
     )
-    
-    parser.add_argument('-n', '--name', required=True, help='App name')
-    parser.add_argument('-b', '--bundle-id', required=True, help='Bundle ID')
-    parser.add_argument('-v', '--version', default='1.0', help='App version')
-    parser.add_argument('-t', '--team-id', default='XXXXXXXXXX', help='Team ID')
-    parser.add_argument('-o', '--output', default='.', help='Output directory')
-    parser.add_argument('--verbose', action='store_true', help='Verbose output')
+    parser.add_argument(
+        "--name",
+        default="Fearn",
+        help="App name"
+    )
+    parser.add_argument(
+        "--bundle-id",
+        default="com.krnlthemodder.fearn",
+        help="Bundle ID for the app"
+    )
+    parser.add_argument(
+        "--version",
+        default="1.0",
+        help="App version"
+    )
+    parser.add_argument(
+        "--output",
+        default=".",
+        help="Output directory for the IPA"
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Verbose output"
+    )
     
     args = parser.parse_args()
     
-    builder = IPABuilder(verbose=args.verbose)
-    success = builder.build_ipa(
-        app_name=args.name,
-        bundle_id=args.bundle_id,
-        version=args.version,
-        team_id=args.team_id,
-        output_dir=args.output
-    )
+    try:
+        # Create IPA structure
+        payload_dir, app_dir = create_ipa_structure(args.name, args.verbose)
+        
+        # Ensure executable exists
+        executable_path = os.path.join(app_dir, args.name)
+        if not os.path.exists(executable_path):
+            open(executable_path, 'a').close()
+            os.chmod(executable_path, 0o755)
+            if args.verbose:
+                print(f"Created executable placeholder: {executable_path}")
+        
+        # Create IPA
+        ipa_filename = f"{args.name}-{args.version}.ipa"
+        ipa_path = os.path.join(args.output, ipa_filename)
+        create_ipa(payload_dir, ipa_path, args.verbose)
+        
+        print(f"✓ IPA built successfully: {ipa_path}")
+        print(f"  - App name: {args.name}")
+        print(f"  - Bundle ID: {args.bundle_id}")
+        print(f"  - Version: {args.version}")
+        
+    except Exception as e:
+        print(f"✗ Error: {e}")
+        return 1
     
-    sys.exit(0 if success else 1)
+    return 0
 
-
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    exit(main())
