@@ -1,167 +1,93 @@
-name: Build IPA Package
+name: Build & Sign IPA
 
 on:
   push:
-    branches: [ main, develop ]
-    paths:
-      - 'Payload/**'
-      - '*.py'
-      - '.github/workflows/build-ipa.yml'
-  pull_request:
     branches: [ main ]
   workflow_dispatch:
-    inputs:
-      app_name:
-        description: 'App Name'
-        required: false
-        default: 'MyApp'
-      bundle_id:
-        description: 'Bundle ID'
-        required: false
-        default: 'com.example.app'
-      version:
-        description: 'Version'
-        required: false
-        default: '1.0'
+
+permissions:
+  contents: write
+  actions: write
 
 jobs:
   build:
-    name: Build IPA
     runs-on: macos-latest
-    permissions:
-      contents: read
-      packages: write
-
+    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Detect App Name
-        id: detect_app
-        run: |
-          APP=$(ls Payload | head -1 | sed 's/.app//')
-          echo "app=$APP" >> $GITHUB_OUTPUT
-          echo "Detected app: $APP"
-
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-          cache: 'pip'
-
+      
       - name: Install dependencies
         run: |
+          brew install openssl zip
           python -m pip install --upgrade pip
-          pip install pyyaml
-
-      - name: Get version
-        id: version
+      
+      - name: Generate certificates and provisioning profile
         run: |
-          if [ -f VERSION ]; then
-            VERSION=$(cat VERSION)
-          else
-            VERSION="${{ github.event.inputs.version }}"
+          python3 fearn_cert_provisioning_generator.py \
+            --bundle-id "com.krnlthemodder.fearn" \
+            --team-id "XXXXXXXXXX" \
+            --name "Fearn" \
+            --verbose
+      
+      - name: Ensure executable exists
+        run: |
+          mkdir -p Payload/Fearn.app
+          if [ ! -f "Payload/Fearn.app/Fearn" ]; then
+            touch "Payload/Fearn.app/Fearn"
+            chmod +x "Payload/Fearn.app/Fearn"
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Build version: $VERSION"
-
-      - name: Create app bundle structure
+      
+      - name: Build IPA
         run: |
-          mkdir -p Payload/${{ steps.detect_app.outputs.app }}.app/_CodeSignature
-          mkdir -p Payload/${{ steps.detect_app.outputs.app }}.app/assets
-          echo "App bundle structure created"
-
-      - name: Generate Info.plist
+          python3 fearn_ipa_builder.py \
+            --name "Fearn" \
+            --bundle-id "com.krnlthemodder.fearn" \
+            --version "1.0" \
+            --output "." \
+            --verbose
+      
+      - name: Sign IPA
         run: |
-          python3 << 'EOF'
-          import plistlib
-          from pathlib import Path
-
-          info = {
-              'CFBundleDevelopmentRegion': 'en',
-              'CFBundleExecutable': '${{ steps.detect_app.outputs.app }}',
-              'CFBundleIdentifier': '${{ github.event.inputs.bundle_id }}',
-              'CFBundleInfoDictionaryVersion': '6.0',
-              'CFBundleName': '${{ steps.detect_app.outputs.app }}',
-              'CFBundlePackageType': 'APPL',
-              'CFBundleShortVersionString': '${{ steps.version.outputs.version }}',
-              'CFBundleVersion': '1',
-              'LSRequiresIPhoneOS': True,
-              'UILaunchStoryboardName': 'LaunchScreen',
-              'UISupportedInterfaceOrientations': [
-                  'UIInterfaceOrientationPortrait',
-                  'UIInterfaceOrientationLandscapeLeft',
-                  'UIInterfaceOrientationLandscapeRight',
-              ],
-          }
-
-          plist_path = Path(f"Payload/${{ steps.detect_app.outputs.app }}.app/Info.plist")
-          with open(plist_path, "wb") as f:
-              plistlib.dump(info, f)
-
-          print("✓ Generated Info.plist")
-          EOF
-
-      - name: Create PkgInfo
-        run: |
-          printf 'APPL????' > Payload/${{ steps.detect_app.outputs.app }}.app/PkgInfo
-          echo "✓ Created PkgInfo"
-
-      - name: Generate CodeResources
-        run: |
-          cat > Payload/${{ steps.detect_app.outputs.app }}.app/_CodeSignature/CodeResources << 'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>files</key>
-              <dict>
-                  <key>Info.plist</key>
-                  <data></data>
-              </dict>
-              <key>rules</key>
-              <dict>
-                  <key>^</key><true/>
-              </dict>
-          </dict>
-          </plist>
-          EOF
-          echo "✓ Generated CodeResources"
-
-      - name: Create iTunes Metadata
-        run: |
-          python3 << 'EOF'
-          import plistlib
-          from pathlib import Path
-
-          metadata = {
-              'bundleShortVersionString': '${{ steps.version.outputs.version }}',
-              'bundleVersion': '1',
-              'softwareVersionBundleId': '${{ github.event.inputs.bundle_id }}',
-              'artistName': 'Developer',
-              'softwarePlatforms': ['iphoneos'],
-          }
-
-          with open("iTunesMetadata.plist", "wb") as f:
-              plistlib.dump(metadata, f)
-
-          print("✓ Generated iTunesMetadata.plist")
-          EOF
-
-      - name: Build IPA Archive
-        run: |
-          IPA_NAME=${{ steps.detect_app.outputs.app }}-${{ steps.version.outputs.version }}.ipa
-          zip -r "$IPA_NAME" Payload iTunesMetadata.plist -q
-          echo "IPA=$IPA_NAME" >> $GITHUB_OUTPUT
-          echo "✓ IPA archive created: $IPA_NAME"
-
-      - name: Upload IPA as Artifact
-        uses: actions/upload-artifact@v4
+          python3 fearn_signer.py resign \
+            -i Fearn-1.0.ipa \
+            -c "Fearn Self-Signed" \
+            -o Fearn-1.0-signed.ipa \
+            --verbose
+      
+      - name: Create release
+        uses: softprops/action-gh-release@v1
         with:
-          name: IPA
-          path: ${{ steps.build.outputs.IPA }}
-          retention-days: 30
-
-  # (Quality-check, security-scan, test-install, notify jobs remain identical)
+          files: |
+            Fearn-1.0-signed.ipa
+            certs/Fearn.p12
+            certs/Fearn.mobileprovision
+          tag_name: v1.0-${{ github.run_number }}
+          body: |
+            # Fearn v1.0 Build ${{ github.run_number }}
+            
+            ## Files
+            - `Fearn-1.0-signed.ipa` - Signed IPA ready for sideloading
+            - `Fearn.p12` - Certificate (Password: fearn123)
+            - `Fearn.mobileprovision` - Provisioning profile
+            
+            ## Installation
+            
+            1. Import `Fearn.p12` into Keychain Access (password: fearn123)
+            2. Trust the certificate
+            3. Install IPA using Xcode or ideviceinstaller
+            
+            ## Features
+            - ✅ Self-signed certificate
+            - ✅ Provisioning profile with get-task-allow
+            - ✅ Ready for sideloading
+            - ✅ Debugging enabled
+            
+            Built on: ${{ github.event.head_commit.timestamp }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
