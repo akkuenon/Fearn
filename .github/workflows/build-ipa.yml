@@ -35,14 +35,6 @@ jobs:
             --name "Fearn" \
             --verbose
       
-      - name: Ensure executable exists
-        run: |
-          mkdir -p Payload/Fearn.app
-          if [ ! -f "Payload/Fearn.app/Fearn" ]; then
-            touch "Payload/Fearn.app/Fearn"
-            chmod +x "Payload/Fearn.app/Fearn"
-          fi
-      
       - name: Build IPA
         run: |
           python3 fearn_ipa_builder.py \
