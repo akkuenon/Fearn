@@ -84,11 +84,7 @@ jobs:
           body: |
             # Fearn v1.7.0 Build ${{ github.run_number }}
             
-            ## 🐛 Major Bugfix Release
             
-            This release includes critical crash fixes and stability improvements for the IPA signing process.
-            
-            ## Files
             - `Fearn-1.7.0-signed.ipa` - Signed IPA ready for sideloading
             - `Fearn.p12` - Certificate (Password: fearn123)
             - `Fearn.mobileprovision` - Provisioning profile
